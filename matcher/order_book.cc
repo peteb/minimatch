@@ -45,45 +45,43 @@ order order_book::fill_order(const order &original_order) {
   std::vector<order> &order_collection = (original_order.side == SIDE_BUY ? sell_orders : buy_orders);
   auto iter = begin(order_collection);
   while (iter != order_collection.end()) {
-    if (iter->can_fill(original_order)) {
-      unsigned quantity = std::min(iter->quantity, remaining.quantity);
-      iter->quantity -= quantity;
-      remaining.quantity -= quantity;
-
-      if (iter->quantity == 0) {
-        iter = order_collection.erase(iter);
-      }
-
-      // Send report for the order book order
-      order_match_report_t first_report;
-      first_report.ins_id = ins_id.c_str();
-      first_report.order_id = iter->order_id;
-      first_report.quantity = quantity;
-      first_report.price = iter->price;
-
-      for (auto p : callbacks) {
-        p.second->order_matched(p.first, &first_report);
-      }
-
-      // ... and for the new order
-      order_match_report_t second_report;
-      second_report.ins_id = ins_id.c_str();
-      second_report.order_id = remaining.order_id;
-      second_report.quantity = quantity;
-      second_report.price = iter->price;
-
-      for (auto p : callbacks) {
-        p.second->order_matched(p.first, &second_report);
-      }
-
-      if (remaining.quantity == 0) {
-        break;
-      }
-
+    if (!iter->can_fill(original_order)) {
+      ++iter;
       continue;
     }
-    else {
-      ++iter;
+
+    unsigned quantity = std::min(iter->quantity, remaining.quantity);
+    iter->quantity -= quantity;
+    remaining.quantity -= quantity;
+
+    // Send report for the order book order
+    order_match_report_t first_report;
+    first_report.ins_id = ins_id.c_str();
+    first_report.order_id = iter->order_id;
+    first_report.quantity = quantity;
+    first_report.price = iter->price;
+
+    for (auto p : callbacks) {
+      p.second->order_matched(p.first, &first_report);
+    }
+
+    // ... and for the new order
+    order_match_report_t second_report;
+    second_report.ins_id = ins_id.c_str();
+    second_report.order_id = remaining.order_id;
+    second_report.quantity = quantity;
+    second_report.price = iter->price;
+
+    for (auto p : callbacks) {
+      p.second->order_matched(p.first, &second_report);
+    }
+
+    if (iter->quantity == 0) {
+      iter = order_collection.erase(iter);
+    }
+
+    if (remaining.quantity == 0) {
+      break;
     }
   }
 

@@ -2,6 +2,7 @@
 #define _FRAMEWORK_SERVICES_H
 
 #include <stdint.h>
+#include <stdlib.h>
 
 // Error codes
 typedef int status_t;
@@ -16,7 +17,7 @@ typedef int status_t;
 #define SIDE_BUY  1
 #define SIDE_SELL 2
 
-// Service APIs
+// Matching engine
 typedef struct order_match_report {
   const char *ins_id;
   uint64_t order_id;
@@ -34,6 +35,18 @@ typedef struct matching_engine {
   status_t (*cancel_order)(const char *ins_id, uint64_t order_id);
   status_t (*dec_in_price)(const char *ins_id, int *dec);
 } matching_engine_t;
+
+
+// Messaging
+typedef struct messaging_callback {
+  status_t (*received_message)(const void *data, size_t size);
+} messaging_callback_t;
+
+typedef struct messaging {
+  status_t (*register_callback)(messaging_callback_t *callback, void *opaque);
+  status_t (*send_message)(const void *data, size_t size);
+} messaging_t;
+
 
 // Library entry points
 extern "C" void *find_service(const char *name);

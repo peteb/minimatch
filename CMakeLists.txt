@@ -11,10 +11,15 @@ find_package(GTest REQUIRED)
 
 include_directories(${GTEST_INCLUDE_DIRS}) # TODO: pull out test suite into own project
 include_directories(.)
+
 add_subdirectory(framework)
 add_subdirectory(matcher)
+add_subdirectory(fbgw)
+add_subdirectory(api)
+add_subdirectory(fb_loadgen)
+add_subdirectory(messaging)
 
-set(MODULES ${GLOG_LIBRARIES} framework matcher)
+set(MODULES ${GLOG_LIBRARIES} framework matcher messaging)
 
 add_executable(minimatch main.cc)
 target_link_libraries(minimatch ${MODULES})

@@ -4,6 +4,7 @@
 #include "framework/services.h"
 #include "utils/memory.h"
 #include "utils/thread.h"
+#include "utils/variables.h"
 
 #include <glog/logging.h>
 #include <mutex>
@@ -42,9 +43,15 @@ void messaging_init() {
   base = event_base_new();
   assert(base && "Failed to create event base");
 
-  mc_conn = make_unique<multicast_connection>("224.0.0.0", 40100);
+  mc_conn = make_unique<multicast_connection>("239.0.0.1", 40100);
   mc_conn->on_read = on_read;
-  mc_conn->join(base);
+
+  if (read_variable<bool>("MSG_BUFFER_TX", true)) {
+    mc_conn->join(base, base);
+  }
+  else {
+    mc_conn->join(base, nullptr);
+  }
 
   eventloop = std::move(cpu_thread("messaging", event_base_dispatch, base));
 }
@@ -73,7 +80,7 @@ status_t register_callback(messaging_callback_t *cb, void *opaque) {
 // --
 status_t send_message(const void *data, size_t size) {
   assert(mc_conn && "No multicast connection established");
-  mc_conn->send(data, size, SEND_SYNC);
+  mc_conn->send(data, size);
   return SUC_OK;
 }
 

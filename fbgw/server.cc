@@ -52,7 +52,6 @@ static void readcb(struct bufferevent *bev, void *ctx) {
       char buf[1024];
       int n = evbuffer_remove(input, buf, data_length + sizeof(unsigned short));
       messaging->send_message(buf + 2, n - 2);
-
       // TODO: verify data
 
     }

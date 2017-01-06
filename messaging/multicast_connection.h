@@ -6,6 +6,9 @@
 #include <cstdint>
 #include <atomic>
 #include <functional>
+#include <mutex>
+#include <queue>
+#include <vector>
 
 #include <netinet/in.h>
 #include <event2/event.h>
@@ -21,22 +24,33 @@ public:
   multicast_connection(const char *group_address, uint16_t port);
 
   // Setup socket, join the event loop, ...
-  void join(struct event_base *base);
+  void join(struct event_base *read_base, struct event_base *write_base);
   void leave();
 
   // Thread safe
-  void send(const void *data, size_t size, int flags);
+  uint64_t send_now(const void *data, size_t size, int flags);
+  void send(const void *data, size_t size);
 
   std::function<void(const void *, size_t)> on_read;
 
   void readcb(evutil_socket_t sock, short events);
+  void writecb(evutil_socket_t sock, short events);
 
 private:
   struct sockaddr_in remote_addr;
   struct sockaddr_in local_addr;
 
   struct event *read_event = nullptr;
+  struct event *write_event = nullptr;
   evutil_socket_t sock;
+
+  std::mutex tx_queue_m;
+  std::queue<std::vector<char>> tx_queue;
+
+  std::vector<char> in_flight_data;
+  uint64_t in_flight_seq_num;
+
+  bool sync_send;
 
   std::atomic<uint64_t> last_tx_seq_num;
   alignas(64) std::atomic<uint64_t> last_rx_seq_num;

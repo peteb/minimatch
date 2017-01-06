@@ -1,14 +1,21 @@
 #include "multicast_connection.h"
+#include "utils/variables.h"
+#include "utils/timing.h"
 
 #include <glog/logging.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <chrono>
+#include <ratio>
 
-#define MAX_BUFFER_SIZE 1024
+#include "api/apidef_generated.h"
+
+#define MAX_BUFFER_SIZE 256
 
 // --
 static void readcb(evutil_socket_t sock, short events, void *opaque);
+static void writecb(evutil_socket_t sock, short events, void *opaque);
 
 // --
 typedef struct multicast_header {
@@ -30,10 +37,12 @@ multicast_connection::multicast_connection(const char *group_address, uint16_t p
   local_addr.sin_port = htons(port);
 
   last_tx_seq_num = 0;
+
+  sync_send = read_variable<bool>("MSG_SYNC_SEND", true);
 }
 
 // --
-void multicast_connection::join(struct event_base *base) {
+void multicast_connection::join(struct event_base *read_base, struct event_base *write_base) {
   if (read_event) {
     LOG(ERROR) << "Connection already joined";
     std::abort();
@@ -53,41 +62,62 @@ void multicast_connection::join(struct event_base *base) {
     std::abort();
   }
 
-  int loop = 1;
-  if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop)) < 0) {
-    LOG(ERROR) << "Failed to set multicast loop: " << strerror(errno);
-    std::abort();
+  if (read_base) {
+    int loop = 1;
+    if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop)) < 0) {
+      LOG(ERROR) << "Failed to set multicast loop: " << strerror(errno);
+      std::abort();
+    }
+
+    struct ip_mreq mreq;
+    mreq.imr_multiaddr = remote_addr.sin_addr;
+    mreq.imr_interface = local_addr.sin_addr;
+
+    if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) << 0) {
+      LOG(ERROR) << "Failed to subscribe to multicast group: " << strerror(errno);
+      std::abort();
+    }
+
+    // Join the event loop
+    read_event = event_new(read_base, sock, EV_READ|EV_PERSIST, ::readcb, this);
+    if (!read_event) {
+      LOG(ERROR) << "Failed to create read event";
+      std::abort();
+    }
+
+    event_add(read_event, nullptr);
   }
 
-  struct ip_mreq mreq;
-  mreq.imr_multiaddr = remote_addr.sin_addr;
-  mreq.imr_interface = local_addr.sin_addr;
+  if (write_base) {
+    write_event = event_new(write_base, sock, EV_WRITE|EV_PERSIST, ::writecb, this);
+    if (!write_event) {
+      LOG(ERROR) << "Failed to create write event";
+      std::abort();
+    }
 
-  if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) << 0) {
-    LOG(ERROR) << "Failed to subscribe to multicast group: " << strerror(errno);
-    std::abort();
+    event_add(write_event, nullptr);
   }
 
-  // Join the event loop
-  read_event = event_new(base, sock, EV_READ|EV_PERSIST, ::readcb, this);
-  if (!read_event) {
-    LOG(ERROR) << "Failed to create read event";
-    std::abort();
-  }
-
-  event_add(read_event, nullptr);
 }
 
 // --
 void multicast_connection::leave() {
-  if (!read_event) {
+  if (!sock) {
     LOG(WARNING) << "Connection not joined";
     return;
   }
 
   evutil_closesocket(sock);
-  event_free(read_event);
-  read_event = nullptr;
+
+  if (read_event) {
+    event_free(read_event);
+    read_event = nullptr;
+  }
+
+  if (write_event) {
+    event_free(write_event);
+    write_event = nullptr;
+  }
 }
 
 // --
@@ -106,6 +136,10 @@ void multicast_connection::readcb(evutil_socket_t sock, short events) {
   // NOTE: expecting host endian for header fields
   multicast_header_t *hdr = reinterpret_cast<multicast_header_t *>(buffer);
   uint64_t seq_num = hdr->seq_num;
+
+  if (seq_num == in_flight_seq_num) {
+    in_flight_seq_num = 0;
+  }
 
   if (last_rx_seq_num == 0) {
     if (seq_num - last_rx_seq_num > 1) {
@@ -136,7 +170,23 @@ void multicast_connection::readcb(evutil_socket_t sock, short events) {
 }
 
 // --
-void multicast_connection::send(const void *data, size_t size, int flags) {
+void multicast_connection::writecb(evutil_socket_t sock, short events) {
+  static timing<5000, 20, uint8_t> statistics(__func__);
+
+  statistics.benchmark<void>([this]{
+    std::lock_guard<std::mutex> lock(tx_queue_m);
+    if (tx_queue.empty()) {
+      return;
+    }
+
+    in_flight_data = std::move(tx_queue.front());
+    in_flight_seq_num = send_now(in_flight_data.data(), in_flight_data.size(), 0);
+    tx_queue.pop();
+  });
+}
+
+// --
+uint64_t multicast_connection::send_now(const void *data, size_t size, int flags) {
   if (size > MAX_BUFFER_SIZE - sizeof(multicast_header_t)) {
     LOG(ERROR) << "Buffer overrun";
     std::abort();
@@ -148,18 +198,47 @@ void multicast_connection::send(const void *data, size_t size, int flags) {
   hdr->seq_num = new_seq;
 
   memcpy(buffer + sizeof(multicast_header_t), data, size);
-  int n = sendto(sock, buffer, size + sizeof(multicast_header_t), 0, reinterpret_cast<struct sockaddr *>(&remote_addr), sizeof(remote_addr));
-  if (n < 0) {
-    LOG(ERROR) << "Failed to send multicast message: " << strerror(errno);
-    std::abort();
+
+  while (true) {
+    int n = sendto(sock, buffer, size + sizeof(multicast_header_t), 0, reinterpret_cast<struct sockaddr *>(&remote_addr), sizeof(remote_addr));
+    if (n < 0) {
+      if (errno == EAGAIN) {
+        continue;
+      }
+
+      LOG(ERROR) << "Failed to send multicast message: " << strerror(errno);
+      std::abort();
+    }
+    break;
   }
 
   if (flags & SEND_SYNC) {
     while (last_rx_seq_num != new_seq);
+  }
+
+  return new_seq;
+}
+
+// --
+void multicast_connection::send(const void *data, size_t size) {
+  if (write_event) {
+    const char *ptr = reinterpret_cast<const char *>(data);
+    std::vector<char> v(ptr, ptr + size);
+
+    std::lock_guard<std::mutex> lock(tx_queue_m);
+    tx_queue.emplace(v);
+  }
+  else {
+    send_now(data, size, sync_send ? SEND_SYNC : 0);
   }
 }
 
 // --
 void readcb(evutil_socket_t sock, short events, void *opaque) {
   static_cast<multicast_connection *>(opaque)->readcb(sock, events);
+}
+
+// --
+void writecb(evutil_socket_t sock, short events, void *opaque) {
+  static_cast<multicast_connection *>(opaque)->writecb(sock, events);
 }

@@ -5,6 +5,7 @@
 #include "utils/memory.h"
 #include "utils/thread.h"
 #include "utils/variables.h"
+#include "utils/timing.h"
 
 #include <glog/logging.h>
 #include <mutex>
@@ -86,6 +87,9 @@ status_t send_message(const void *data, size_t size) {
 
 // --
 void on_read(const void *data, size_t size) {
+  static stream_measure measure("msg_rx");
+  measure.collect(size);
+
   std::lock_guard<std::mutex> lock(cb_mutex);
 
   for (auto &cb : callbacks) {

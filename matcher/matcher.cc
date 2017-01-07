@@ -78,10 +78,10 @@ status_t received_message(const void *data, size_t size) {
       return SUC_OK;
     }
 
-    LOG(INFO) << "limit order side=" << order->side()
+    /*    LOG(INFO) << "limit order side=" << order->side()
               << ", quantity=" << order->quantity()
               << ", price=" << order->price()
-              << ", local_id=" << order->local_id();
+              << ", local_id=" << order->local_id();*/
   }
 
   return SUC_OK;

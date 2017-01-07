@@ -13,6 +13,8 @@
 #include <netinet/in.h>
 #include <event2/event.h>
 
+#include "sequence.h"
+
 #define SEND_SYNC 0x0001
 
 /*
@@ -37,6 +39,8 @@ public:
   void writecb(evutil_socket_t sock, short events);
 
 private:
+  void transmit_message(const void *data, size_t size);
+
   struct sockaddr_in remote_addr;
   struct sockaddr_in local_addr;
 
@@ -47,11 +51,13 @@ private:
   std::mutex tx_queue_m;
   std::queue<std::vector<char>> tx_queue;
 
-  std::vector<char> in_flight_data;
   uint64_t in_flight_seq_num;
 
   bool sync_send;
 
+  sequence_numbers sequences;
+
+  // Used in non-buffered mode
   std::atomic<uint64_t> last_tx_seq_num;
   alignas(64) std::atomic<uint64_t> last_rx_seq_num;
 };

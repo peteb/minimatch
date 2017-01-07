@@ -1,4 +1,4 @@
-# -* cmake -*-
+# -*- cmake -*-
 
 add_executable(fbgw main.cc server.cc)
 

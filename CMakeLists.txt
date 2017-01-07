@@ -1,4 +1,4 @@
-# -* cmake -*-
+# -*- cmake -*-
 cmake_minimum_required(VERSION 2.6)
 project(minimatch)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake_modules)
@@ -17,6 +17,7 @@ add_subdirectory(matcher)
 add_subdirectory(fbgw)
 add_subdirectory(api)
 add_subdirectory(fb_loadgen)
+add_subdirectory(msg_loadgen)
 add_subdirectory(messaging)
 
 set(MODULES ${GLOG_LIBRARIES} framework matcher messaging)

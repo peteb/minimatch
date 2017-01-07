@@ -1,4 +1,4 @@
-# -* cmake -*-
+# -*- cmake -*-
 
 add_executable(fb_loadgen main.cc)
 

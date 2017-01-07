@@ -7,14 +7,26 @@
 #include <cstdlib>
 #include <algorithm>
 #include <cstring>
+#include <sstream>
 
 // --
 template<typename T>
-inline T convert(const char *value);
+inline T convert(const char *value) {
+  std::stringstream ss;
+  ss << value;
+  T ret;
+  ss >> ret;
+  return ret;
+}
 
 template<>
 inline std::string convert(const char *value) {
   return std::string(value);
+}
+
+template<>
+inline const char *convert(const char *value) {
+  return value;
 }
 
 template<>

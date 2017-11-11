@@ -1,0 +1,25 @@
+namespace api;
+
+enum SideType : byte {
+  Unknown,
+  Buy,
+  Sell
+}
+
+table LimitOrder {
+  ins_id:string;
+  side:SideType;
+  quantity:uint;
+  price:ulong;
+  local_id:ulong;
+}
+
+union MessageType {
+  LimitOrder
+}
+
+table Message {
+  Body:MessageType;
+}
+
+root_type Message;
